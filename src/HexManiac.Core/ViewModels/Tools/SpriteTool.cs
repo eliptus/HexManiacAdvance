@@ -613,7 +613,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       public ErrorInfo TryImport(IFileSystem fileSystem, string currentDirectory, int address, string filePath, ImportType importType) {
          try {
-            (short[] image, int width) = fileSystem.LoadImage(Path.Combine(currentDirectory, filePath));
+            var path = Path.Combine(currentDirectory, filePath);
+            (short[] image, int width) = fileSystem.LoadImage(path);
+            if (image == null) return new ErrorInfo($"Unable to load image {path}.");
             SpriteAddress = address;
             ImportSpriteAndPalette(fileSystem, image, width, importType);
             return ErrorInfo.NoError;
@@ -1012,7 +1014,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var tiles = images.Select(image => Tilize(image, PixelWidth)).ToArray();
          var allTiles = tiles.SelectMany(tilesForImage => tilesForImage).ToArray();
          var expectedPalettePages = usablePalPages?.Count ?? 1;
-         if (spriteRun.Pages == expectedPalettePages) expectedPalettePages = 1; // handle the Castform case
          if (expectedPalettePages == 0 && paletteRun != null) {
             viewPort.RaiseError("You must select at least one palette.");
             return;
@@ -1026,10 +1027,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             for (int i = 0; i < usablePalPages.Count; i++) palettes[usablePalPages[i]] = newPalettes[usablePalPages[i]];
          }
 
+         bool palettePerSprite = false;
+         if (spriteRun.Pages == expectedPalettePages) { // handle the Castform case
+            palettePerSprite = true;
+         }
+
          var newSprite = spriteRun;
          for (int page = 0; page < images.Length; page++) {
             var indexedTiles = new int[tiles[page].Length][,];
-            for (int i = 0; i < indexedTiles.Length; i++) indexedTiles[i] = Index(tiles[page][i], palettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel, paletteRun?.PaletteFormat.InitialBlankPages ?? 0);
+            for (int i = 0; i < indexedTiles.Length; i++) indexedTiles[i] = Index(tiles[page][i], palettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel, paletteRun?.PaletteFormat.InitialBlankPages ?? 0, palettePerSprite);
             var sprite = Detilize(indexedTiles, spriteRun.SpriteFormat.TileWidth);
             newSprite = newSprite.SetPixels(model, viewPort.CurrentChange, page, sprite);
             if (newSprite is ITilemapRun tilemap && model.GetNextRun(tilemap.FindMatchingTileset(model)) is ITilesetRun tileset && model.ReadMultiByteValue(tileset.Start + 1, 3) / (tileset.SpriteFormat.BitsPerPixel * 8) == 1024) {
@@ -1060,7 +1066,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
          // figure out the new palettes, using only the usable palettes. Leave the other palettes alone.
          var palettes = paletteRun.Pages.Range().Select(i => paletteRun.GetPalette(model, i)).ToArray();
-         if (spriteRun.Pages == paletteRun.Pages) palettes = new[] { palettes[palPage] };
          var initialBlankPages = paletteRun.PaletteFormat.InitialBlankPages;
          var bits = paletteRun.PaletteFormat.Bits;
 
@@ -1094,7 +1099,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
          // part 2: build palettes for the new tiles
          var expectedPalettePages = paletteRun.Pages;
-         if (spriteRun.Pages == paletteRun.Pages) expectedPalettePages = 1; // handle the Castfrom case
+         bool palettePerSprite = false;
+         if (spriteRun.Pages == paletteRun.Pages) {
+            expectedPalettePages = 1; // handle the Castfrom case
+            palettePerSprite = true;
+         }
 
          var newPalettes = new IReadOnlyList<short>[palettes.Length];
          var tempPalettes = usablePalPages.Select(i => palettes[i]).ToArray();
@@ -1104,7 +1113,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             else newPalettes[i] = palettes[i];
          }
          var allIndexedTiles = new int[allTiles.Length][,];
-         for (int i = 0; i < allIndexedTiles.Length; i++) allIndexedTiles[i] = Index(allTiles[i], newPalettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel, initialBlankPages);
+         for (int i = 0; i < allIndexedTiles.Length; i++) allIndexedTiles[i] = Index(allTiles[i], newPalettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel, initialBlankPages, palettePerSprite);
 
          var spriteData = Detilize(allIndexedTiles, spriteRun.SpriteFormat.TileWidth);
          var newWeightedPalettes = WeightedPalette.Weigh(spriteData, newPalettes, bits, initialBlankPages);
@@ -1134,7 +1143,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          // part 5: update the current sprite to use the new palette
          for (int page = 0; page < images.Length; page++) {
             var indexedTiles = new int[tiles[page].Length][,];
-            for (int i = 0; i < indexedTiles.Length; i++) indexedTiles[i] = Index(tiles[page][i], newPalettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel, initialBlankPages);
+            for (int i = 0; i < indexedTiles.Length; i++) indexedTiles[i] = Index(tiles[page][i], newPalettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel, initialBlankPages, palettePerSprite);
             spriteData = Detilize(indexedTiles, spriteRun.SpriteFormat.TileWidth);
             currentSpriteRun = currentSpriteRun.SetPixels(model, viewPort.CurrentChange, page, spriteData);
          }
